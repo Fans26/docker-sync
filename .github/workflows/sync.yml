@@ -9,52 +9,100 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # 将 secrets 注入环境变量（避免直接嵌入 shell）
+    env:
+      ALIYUN_REGISTRY: crpi-4hr249qoofi8wkbd.cn-guangzhou.personal.cr.aliyuncs.com
+      ALIYUN_NAMESPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
+      ALIYUN_USER: ${{ secrets.ALIYUN_REGISTRY_USER }}
+      ALIYUN_PASS: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Login to Aliyun Registry
       run: |
-        # 已经替换为你的广州个人版域名
-        echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login crpi-4hr249qoofi8wkbd.cn-guangzhou.personal.cr.aliyuncs.com --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
+        echo "$ALIYUN_PASS" | docker login "$ALIYUN_REGISTRY" \
+          --username "$ALIYUN_USER" \
+          --password-stdin
 
     - name: Read and Sync Images
       run: |
+        set -e  # 任何命令失败立即退出
+        
         if [ ! -f images.txt ]; then
-          echo "images.txt 不存在，请先创建该文件！"
+          echo "::error::images.txt 不存在，请先创建该文件！"
           exit 1
         fi
         
+        failed=0
+        success=0
+        
         while IFS= read -r image || [ -n "$image" ]; do
-          [[ -z "$image" || "$image" =~ ^# ]] && continue
+          # 跳过空行和注释
+          line=$(echo "$image" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          [ -z "$line" ] && continue
+          [[ "$line" == \#* ]] && continue
           
-          echo "----------------------------------------"
-          echo "开始处理镜像: $image"
-          echo "----------------------------------------"
+          echo "========================================"
+          echo "开始处理: $line"
+          echo "========================================"
           
-          # 1. 从 Docker Hub 境外拉取镜像
-          docker pull "$image"
-          
-          # 2. 清洗镜像名称
-          if [[ "$image" != */* ]]; then
-             clean_image="library_${image}"
-          else
-             clean_image=$(echo "$image" | tr '/' '_')
+          # 1. 从 Docker Hub 拉取（带重试）
+          if ! docker pull "$line"; then
+            echo "::error::拉取失败: $line"
+            failed=$((failed + 1))
+            continue
           fi
           
-          repo_and_tag=$(echo "$image" | sed 's/:/ /')
-          read -r raw_repo raw_tag <<< "$repo_and_tag"
-          [ -z "$raw_tag" ] && raw_tag="latest"
+          # 2. 解析镜像名
+          # 去掉 docker.io/ 前缀（如果有）
+          raw_image="${line#docker.io/}"
           
-          clean_repo=$(echo "$raw_repo" | tr '/' '_')
+          # 分离仓库和标签
+          if [[ "$raw_image" == *:* ]]; then
+            raw_repo="${raw_image%:*}"
+            raw_tag="${raw_image##*:}"
+          else
+            raw_repo="$raw_image"
+            raw_tag="latest"
+          fi
           
-          # 已经将推送目标地址修改为你的广州域名
-          TARGET_IMAGE="://aliyuncs.com{{ secrets.ALIYUN_NAME_SPACE }}/${clean_repo}:${raw_tag}"
+          # 3. 生成阿里云仓库名（/ 替换为 _）
+          # 官方镜像（如 nginx:alpine）前面加 library_ 前缀避免冲突
+          if [[ "$raw_repo" != */* ]]; then
+            clean_repo="library_${raw_repo}"
+          else
+            clean_repo=$(echo "$raw_repo" | tr '/' '_')
+          fi
           
-          # 3. 打新标签并推送到阿里云
-          docker tag "$image" "$TARGET_IMAGE"
-          docker push "$TARGET_IMAGE"
+          # 4. 构建目标地址（修正域名和 namespace）
+          TARGET_IMAGE="${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/${clean_repo}:${raw_tag}"
           
-          echo "同步成功！国内拉取命令："
-          echo "docker pull $TARGET_IMAGE"
+          echo "目标地址: $TARGET_IMAGE"
+          
+          # 5. 打标签并推送
+          docker tag "$line" "$TARGET_IMAGE"
+          
+          if docker push "$TARGET_IMAGE"; then
+            echo "::notice::同步成功: $TARGET_IMAGE"
+            echo "国内拉取命令: docker pull $TARGET_IMAGE"
+            success=$((success + 1))
+          else
+            echo "::error::推送失败: $TARGET_IMAGE"
+            failed=$((failed + 1))
+          fi
+          
+          # 清理本地标签避免堆积
+          docker rmi "$TARGET_IMAGE" 2>/dev/null || true
+          
         done < images.txt
+        
+        echo "========================================"
+        echo "同步完成: 成功 $success, 失败 $failed"
+        echo "========================================"
+
+    - name: Logout from Registry
+      if: always()
+      run: docker logout "$ALIYUN_REGISTRY"
