@@ -1,0 +1,67 @@
+name: Docker Hub Image Sync
+
+on:
+  # 方式 1：当你修改并提交 images.txt 文件时自动触发同步
+  push:
+    paths:
+      - 'images.txt'
+  # 方式 2：允许你在 GitHub 页面上手动点击按钮触发同步
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Login to Aliyun Registry
+      run: |
+        echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ://aliyuncs.com -u "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
+
+    - name: Read and Sync Images
+      run: |
+        if [ ! -f images.txt ]; then
+          echo "images.txt 不存在，请先创建该文件！"
+          exit 1
+        fi
+        
+        # 逐行读取需要代拉的镜像
+        while IFS= read -r image || [ -n "$image" ]; do
+          # 忽略空行和以 # 开头的注释行
+          [[ -z "$image" || "$image" =~ ^# ]] && continue
+          
+          echo "----------------------------------------"
+          echo "开始处理镜像: $image"
+          echo "----------------------------------------"
+          
+          # 1. 从 Docker Hub 境外拉取镜像
+          docker pull "$image"
+          
+          # 2. 将镜像名称转换为符合阿里云规范的格式
+          # 如果镜像是 library/ubuntu 或 ubuntu，统一处理
+          if [[ "$image" != */* ]]; then
+             clean_image="library_${image}"
+          else
+             clean_image=$(echo "$image" | tr '/' '_')
+          fi
+          
+          # 移除非法字符（如冒号替换为下划线，用于生成新的仓库名，但保留最后的标签冒号）
+          # 例如 mysql:8.0 -> 转换为阿里云的：my-docker-hub/mysql:8.0
+          # 这里通过特殊提取将镜像名和Tag分离
+          repo_and_tag=$(echo "$image" | sed 's/:/ /')
+          read -r raw_repo raw_tag <<< "$repo_and_tag"
+          [ -z "$raw_tag" ] && raw_tag="latest"
+          
+          # 再次清洗纯镜像名
+          clean_repo=$(echo "$raw_repo" | tr '/' '_')
+          
+          TARGET_IMAGE="://aliyuncs.com/${{ secrets.ALIYUN_NAME_SPACE }}/${clean_repo}:${raw_tag}"
+          
+          # 3. 打新标签并推送到阿里云
+          docker tag "$image" "$TARGET_IMAGE"
+          docker push "$TARGET_IMAGE"
+          
+          echo "同步成功！国内拉取命令："
+          echo "docker pull $TARGET_IMAGE"
+        done < images.txt
