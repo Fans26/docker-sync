@@ -16,7 +16,7 @@ jobs:
     - name: Login to Aliyun Registry
       run: |
         # 已经替换为你的广州个人版域名
-        echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login crpi-4hr249qoofi8wkbd.cn-guangzhou.personal.cr.aliyuncs.com -u "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
+        echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | sudo docker login crpi-4hr249qoofi8wkbd.cn-guangzhou.personal.cr.aliyuncs.com -username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
 
     - name: Read and Sync Images
       run: |
