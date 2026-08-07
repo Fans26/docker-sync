@@ -1,35 +1,6 @@
-name: Docker Hub Image Sync
-
-on:
-  push:
-    paths:
-      - 'images.txt'
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    # 将 secrets 注入环境变量（避免直接嵌入 shell）
-    env:
-      ALIYUN_REGISTRY: crpi-4hr249qoofi8wkbd.cn-guangzhou.personal.cr.aliyuncs.com
-      ALIYUN_NAMESPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
-      ALIYUN_USER: ${{ secrets.ALIYUN_REGISTRY_USER }}
-      ALIYUN_PASS: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Login to Aliyun Registry
-      run: |
-        echo "$ALIYUN_PASS" | docker login "$ALIYUN_REGISTRY" \
-          --username "$ALIYUN_USER" \
-          --password-stdin
-
     - name: Read and Sync Images
       run: |
-        set -e  # 任何命令失败立即退出
+        set -euo pipefail
         
         if [ ! -f images.txt ]; then
           echo "::error::images.txt 不存在，请先创建该文件！"
@@ -49,7 +20,7 @@ jobs:
           echo "开始处理: $line"
           echo "========================================"
           
-          # 1. 从 Docker Hub 拉取（带重试）
+          # 1. 从 Docker Hub 拉取
           if ! docker pull "$line"; then
             echo "::error::拉取失败: $line"
             failed=$((failed + 1))
@@ -69,17 +40,16 @@ jobs:
             raw_tag="latest"
           fi
           
-          # 3. 生成阿里云仓库名（/ 替换为 _）
-          # 官方镜像（如 nginx:alpine）前面加 library_ 前缀避免冲突
-          if [[ "$raw_repo" != */* ]]; then
-            clean_repo="library_${raw_repo}"
-          else
-            clean_repo=$(echo "$raw_repo" | tr '/' '_')
-          fi
+          # 3. 【关键修复】处理官方镜像的 library/ 前缀
+          # Docker Hub 官方镜像如 postgres:15-alpine 实际为 library/postgres:15-alpine
+          # 推送到阿里云时必须去掉 library/ 前缀，否则会变成 library_postgres
+          clean_repo=$(echo "$raw_repo" | sed 's|^library/||' | tr '/' '_')
           
-          # 4. 构建目标地址（修正域名和 namespace）
+          # 4. 构建目标地址
           TARGET_IMAGE="${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/${clean_repo}:${raw_tag}"
           
+          echo "源镜像: $line"
+          echo "解析仓库: $raw_repo -> 清洗后: $clean_repo"
           echo "目标地址: $TARGET_IMAGE"
           
           # 5. 打标签并推送
@@ -102,7 +72,7 @@ jobs:
         echo "========================================"
         echo "同步完成: 成功 $success, 失败 $failed"
         echo "========================================"
-
-    - name: Logout from Registry
-      if: always()
-      run: docker logout "$ALIYUN_REGISTRY"
+        
+        if [ $failed -gt 0 ]; then
+          exit 1
+        fi
