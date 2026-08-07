@@ -9,8 +9,9 @@ yanwk/comfyui-boot:cu128-slim
 vllm/vllm-openai:latest
 
 # --- LocalAI (本地模型推理) ---
-# 注意: v4.8.0 不存在，官方最新为 v2.28.0
-mudler/localai:v2.28.0
+# 注意: 官方仓库已从 mudler/localai 迁移到 localai/localai
+# 最新稳定版为 v4.8.0
+localai/localai:v4.8.0
 
 # --- Dify (LLM应用平台) ---
 # 注意: Dify 官方仅提供 api 和 web 两个独立镜像
