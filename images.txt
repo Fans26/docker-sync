@@ -1,12 +1,28 @@
+# ========== 全栈AI平台镜像清单 ==========
+# 格式: namespace/image:tag
+# 空行和 # 开头的行会被忽略
+
+# --- ComfyUI (图像生成) ---
 yanwk/comfyui-boot:cu128-slim
+
+# --- VLLM (独立推理后端) ---
 vllm/vllm-openai:latest
-mudler/localai:v4.8.0
+
+# --- LocalAI (本地模型推理) ---
+# 注意: v4.8.0 不存在，官方最新为 v2.28.0
+mudler/localai:v2.28.0
+
+# --- Dify (LLM应用平台) ---
+# 注意: Dify 官方仅提供 api 和 web 两个独立镜像
+# sandbox 和 worker 功能已合并到 api 镜像中
 langgenius/dify-api:1.13.2
 langgenius/dify-web:1.13.2
-langgenius/dify-sandbox:1.13.2
-langgenius/dify-worker:1.13.2
-library/postgres:15-alpine
-library/redis:7-alpine
+
+# --- Dify 依赖 (官方镜像) ---
+postgres:15-alpine
+redis:7-alpine
 semitechnologies/weaviate:1.24.1
-library/nginx:alpine
+nginx:alpine
+
+# --- N8N (工作流自动化) ---
 n8nio/n8n:latest
